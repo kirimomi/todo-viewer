@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>やること</title>
+<meta name="description" content="任意の GitHub リポジトリの Issues をtodoアプリ風に見るビュワー">
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="やること">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+<style>
+:root{
+  color-scheme: light;
+  --bg:#f2f2f7; --card:#ffffff; --text:#1c1c1e; --sub:#6e6e73;
+  --border:#e3e3e8; --accent:#0071e3; --green:#34c759; --danger:#ff3b30;
+  --chip-bg:#ececf1; --input-bg:#ffffff;
+  --shadow:0 1px 3px rgba(0,0,0,.06);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    color-scheme: dark;
+    --bg:#000000; --card:#1c1c1e; --text:#f5f5f7; --sub:#98989f;
+    --border:#38383a; --accent:#2997ff; --chip-bg:#2c2c2e; --input-bg:#1c1c1e;
+    --shadow:0 1px 3px rgba(0,0,0,.4);
+  }
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP","Segoe UI",sans-serif;
+  background:var(--bg); color:var(--text);
+  padding-bottom:calc(24px + env(safe-area-inset-bottom));
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;padding:0}
+input,select{font:inherit;color:inherit}
+a{color:var(--accent);text-decoration:none}
+
+/* ---------- header ---------- */
+header{
+  position:sticky; top:0; z-index:20;
+  background:color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--border);
+}
+.header-in{max-width:660px;margin:0 auto;padding:14px 16px 10px;display:flex;align-items:flex-end;gap:8px}
+h1{font-size:26px;font-weight:800;margin:0;letter-spacing:.01em}
+.count{color:var(--sub);font-size:14px;font-weight:600;padding-bottom:3px}
+.header-btns{margin-left:auto;display:flex;gap:4px;padding-bottom:2px}
+.icon-btn{
+  width:38px;height:38px;border-radius:50%;display:grid;place-items:center;
+  background:var(--card);box-shadow:var(--shadow);font-size:17px;line-height:1;
+}
+.icon-btn:active{transform:scale(.94)}
+.spin{animation:spin 0.9s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------- add form ---------- */
+main{max-width:660px;margin:0 auto;padding:8px 16px 0}
+.add-card{background:var(--card);border-radius:16px;box-shadow:var(--shadow);padding:12px;margin-top:8px}
+.add-row{display:flex;gap:8px}
+#newTitle{
+  flex:1;min-width:0;border:1px solid var(--border);background:var(--input-bg);
+  border-radius:10px;padding:10px 12px;font-size:16px;outline:none;
+}
+#newTitle:focus{border-color:var(--accent)}
+#addBtn{
+  flex:0 0 auto;background:var(--accent);color:#fff;font-weight:700;
+  border-radius:10px;padding:0 18px;font-size:15px;
+}
+#addBtn:disabled{opacity:.45}
+
+/* ---------- items ---------- */
+.card{background:var(--card);border-radius:16px;box-shadow:var(--shadow);overflow:hidden;margin-top:12px}
+.item{display:flex;gap:10px;padding:12px 14px;align-items:flex-start}
+.item + .item{border-top:1px solid var(--border)}
+.check{
+  flex:0 0 auto;width:27px;height:27px;margin-top:1px;border-radius:50%;
+  border:2px solid #c7c7cc;display:grid;place-items:center;
+  color:transparent;font-size:15px;font-weight:800;transition:all .15s;
+}
+.check:active{background:var(--green);border-color:var(--green);color:#fff;transform:scale(1.08)}
+.item-main{flex:1;min-width:0;cursor:pointer}
+.item-title{font-size:16px;line-height:1.45;word-break:break-word}
+.item.fading{opacity:.35}
+.meta{display:flex;flex-wrap:wrap;gap:5px 8px;margin-top:4px;align-items:center}
+.meta .m{font-size:12px;color:var(--sub)}
+.empty{
+  text-align:center;color:var(--sub);padding:34px 16px;font-size:14px;line-height:1.7;
+}
+.stale-note{text-align:center;color:var(--sub);font-size:12px;margin-top:14px}
+
+/* ---------- setup card ---------- */
+.setup{background:var(--card);border-radius:16px;box-shadow:var(--shadow);padding:18px;margin-top:12px}
+.setup h2{font-size:17px;margin:0 0 8px}
+.setup p,.setup li{font-size:14px;line-height:1.7;color:var(--text)}
+.setup ol{margin:8px 0;padding-left:20px}
+.setup .small{font-size:12px;color:var(--sub);line-height:1.6}
+.token-row{display:flex;gap:8px;margin-top:12px}
+#tokenInput{
+  flex:1;min-width:0;border:1px solid var(--border);background:var(--input-bg);
+  border-radius:10px;padding:10px 12px;font-size:14px;outline:none;
+}
+/* All text/password fields: force full-strength text color.
+   (Some fields previously fell back to the browser default rendering,
+    which shows typed text in a washed-out gray, notably on iOS.) */
+input[type="text"], input[type="password"]{
+  border:1px solid var(--border);background:var(--input-bg);
+  border-radius:10px;padding:10px 12px;font-size:16px;outline:none;
+  color:var(--text);-webkit-text-fill-color:var(--text);caret-color:var(--accent);
+}
+input[type="text"]:focus, input[type="password"]:focus{border-color:var(--accent)}
+.token-row input{flex:1;min-width:0}
+::placeholder{color:var(--sub);opacity:.75}
+.primary-btn{
+  background:var(--accent);color:#fff;font-weight:700;border-radius:10px;
+  padding:10px 16px;font-size:14px;display:inline-block;text-align:center;
+}
+.primary-btn:disabled{opacity:.45}
+.ghost-btn{
+  background:var(--chip-bg);color:var(--text);font-weight:600;border-radius:10px;
+  padding:10px 16px;font-size:14px;display:inline-block;text-align:center;
+}
+a.primary-btn{color:#fff}
+
+/* ---------- overlays ---------- */
+.overlay{
+  position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.38);
+  display:none;align-items:flex-end;justify-content:center;
+}
+.overlay.show{display:flex}
+.sheet{
+  background:var(--bg);width:100%;max-width:660px;max-height:86vh;overflow-y:auto;
+  border-radius:20px 20px 0 0;padding:18px 18px calc(20px + env(safe-area-inset-bottom));
+  animation:up .22s ease;
+}
+@media (min-width:700px){ .overlay{align-items:center} .sheet{border-radius:20px} }
+@keyframes up{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}
+.sheet h2{font-size:19px;line-height:1.5;margin:0 0 6px;word-break:break-word}
+.sheet .body{font-size:15px;line-height:1.75;margin-top:12px;word-break:break-word;white-space:pre-wrap}
+.sheet .actions{display:flex;gap:10px;margin-top:20px}
+.sheet .actions > *{flex:1}
+.field-cap{font-size:12px;font-weight:700;color:var(--sub);margin:16px 0 6px;letter-spacing:.04em}
+.wfull{width:100%}
+.guide{font-size:14px;line-height:1.75}
+.guide ol{margin:6px 0;padding-left:20px}
+.guide li{margin:7px 0}
+.guide ul{margin:4px 0;padding-left:18px}
+.guide .small{font-size:12px;color:var(--sub);line-height:1.7}
+
+/* ---------- toast ---------- */
+#toast{
+  position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom));
+  transform:translate(-50%,80px);z-index:60;max-width:min(92vw,480px);
+  background:#2c2c2e;color:#fff;font-size:14px;font-weight:600;
+  padding:11px 16px;border-radius:999px;display:flex;gap:14px;align-items:center;
+  box-shadow:0 6px 24px rgba(0,0,0,.3);transition:transform .25s ease;opacity:0;
+}
+#toast.show{transform:translate(-50%,0);opacity:1}
+#toast button{color:#6ee7a0;font-weight:800;font-size:14px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-in">
+    <h1>やること</h1>
+    <span class="count" id="headCount"></span>
+    <div class="header-btns">
+      <button class="icon-btn" id="refreshBtn" title="再読み込み" aria-label="再読み込み"><span id="refreshIcon">↻</span></button>
+      <button class="icon-btn" id="settingsBtn" title="設定" aria-label="設定">⚙</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div id="setupArea"></div>
+
+  <form class="add-card" id="addForm" hidden>
+    <div class="add-row">
+      <input id="newTitle" type="text" placeholder="やることを追加…" autocomplete="off" enterkeyhint="done">
+      <button id="addBtn" type="submit">追加</button>
+    </div>
+  </form>
+
+  <div id="listArea"></div>
+  <div class="stale-note" id="staleNote"></div>
+</main>
+
+<!-- detail sheet -->
+<div class="overlay" id="detailOverlay">
+  <div class="sheet">
+    <h2 id="dTitle"></h2>
+    <div class="meta" id="dMeta"></div>
+    <div class="body" id="dBody"></div>
+    <div class="actions">
+      <button class="ghost-btn" id="dOpen">GitHubで開く</button>
+      <button class="primary-btn" id="dDone">完了にする</button>
+    </div>
+    <div class="actions">
+      <button class="ghost-btn wfull" id="dClose">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- settings sheet -->
+<div class="overlay" id="settingsOverlay">
+  <div class="sheet">
+    <h2>設定</h2>
+    <div class="field-cap">対象リポジトリ（この端末の設定）</div>
+    <div class="token-row">
+      <input id="ownerInput" type="text" placeholder="owner" autocomplete="off" autocapitalize="off">
+      <input id="repoInput" type="text" placeholder="repo" autocomplete="off" autocapitalize="off">
+      <button class="primary-btn" id="targetSave">変更</button>
+    </div>
+    <p class="small" style="font-size:12px;color:var(--sub);line-height:1.6">
+      対象は GitHub リポジトリの Issues です。変更すると、この端末の表示は新しいリポジトリの内容に切り替わります。
+      トークンの権限（対象リポジトリ）も合わせて変更してください。
+    </p>
+
+    <div class="field-cap">アクセストークン（この端末の中だけに保存されます）</div>
+    <div class="token-row">
+      <input id="tokenInput2" type="password" placeholder="github_pat_…" autocomplete="off">
+      <button class="primary-btn" id="tokenSave2">保存</button>
+    </div>
+    <p class="small" style="font-size:12px;color:var(--sub);line-height:1.6">
+      Fine-grained personal access token を想定しています。対象リポジトリは上の対象リポジトリのみ、
+      権限は Issues の Read and write だけに絞ってください。トークンはこの端末のブラウザ内に保存され、
+      GitHub の API 以外へは送信されません。
+    </p>
+    <div class="actions">
+      <a class="ghost-btn" href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">トークンを作る</a>
+      <button class="ghost-btn" id="tokenClear">トークンを削除</button>
+    </div>
+
+    <div class="field-cap">アプリの更新</div>
+    <p style="margin:0;font-size:14px">表示が古いままのときは、キャッシュを消して最新版を読み直せます。対象リポジトリとトークンの設定は消えません。</p>
+    <div class="actions">
+      <button class="ghost-btn wfull" id="forceUpdateBtn">最新版に更新する</button>
+    </div>
+
+    <div class="field-cap">設定ガイド（初回セットアップの手順）</div>
+    <div class="guide">
+      <ol>
+        <li><b>対象リポジトリを決める</b>：この設定画面の上の欄で owner / repo を設定します。タスクはこのリポジトリの Issues として保存されます。</li>
+        <li><b>アクセストークンを発行する</b>：GitHub の Fine-grained token の作成ページで、次の2つを設定します。
+          <ul>
+            <li>Repository access → <b>Only select repositories</b> で、対象リポジトリだけを選ぶ</li>
+            <li>Permissions → <b>Repository permissions</b>（折りたたまれているのでタップして開く）→ <b>Issues: Read &amp; Write</b> にする（Metadata は自動で付きます）</li>
+          </ul>
+        </li>
+        <li><b>トークンをこのアプリに保存する</b>：この設定画面のトークン欄に貼り付けます。保存先はこの端末のブラウザ内だけで、GitHub の API 以外に送信されません。</li>
+        <li><b>アプリとして置く</b>（任意）：スマホは共有メニューから「ホーム画面に追加」、PC はブラウザの「アプリとしてインストール」で単独のアプリとして起動できます。</li>
+      </ol>
+      <p class="small"><b>困ったとき</b>：読み込みや追加で <b>404</b> が出る場合は、トークンの Repository access に対象リポジトリが含まれていないサインです（権限のない非公開リポジトリには、GitHub が存在を隠すために 404 を返します）。"Public repositories" の選択では非公開リポジトリに届きません。<b>401 / 403</b> の場合は、トークンが無効か、Issues の権限が不足しています。</p>
+    </div>
+
+    <div class="actions">
+      <button class="primary-btn wfull" id="settingsClose">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"><span id="toastMsg"></span><button id="toastBtn" hidden>元に戻す</button></div>
+
+<script>
+'use strict';
+/* ===== config ===== */
+/* Target repository: configurable per device (setup card / Settings).
+   Nothing is built in — until a repository is chosen on this device,
+   the app shows the repository setup card. */
+function loadTarget(){
+  try {
+    const t = JSON.parse(localStorage.getItem('tv_target') || 'null');
+    if (t && t.owner && t.repo) return { owner: String(t.owner), repo: String(t.repo) };
+  } catch (e) { /* fall through */ }
+  return null;
+}
+let TARGET = loadTarget();
+let API = '';
+function rebuildApi(){ API = TARGET ? ('https://api.github.com/repos/' + TARGET.owner + '/' + TARGET.repo) : ''; }
+rebuildApi();
+function targetName(){ return TARGET ? (TARGET.owner + '/' + TARGET.repo) : '(リポジトリ未設定)'; }
+function parseTargetInputs(ownerRaw, repoRaw){
+  let owner = (ownerRaw || '').trim();
+  let repo = (repoRaw || '').trim();
+  if (owner.includes('/')) { const p = owner.split('/'); owner = p[0]; repo = p[1] || repo; }
+  owner = owner.replace(/^@/, ''); repo = repo.replace(/\.git$/, '');
+  if (!owner || !repo || /[\s/]/.test(owner) || /[\s/]/.test(repo)) return null;
+  return { owner: owner, repo: repo };
+}
+function setTarget(owner, repo){
+  TARGET = { owner: owner, repo: repo };
+  localStorage.setItem('tv_target', JSON.stringify(TARGET));
+  rebuildApi();
+  issues = []; lastLoaded = 0;
+  localStorage.removeItem(LS.issues);
+  localStorage.removeItem(LS.time);
+}
+const LS = { token:'tv_token', issues:'tv_cache_issues', time:'tv_cache_time' };
+
+/* ===== state ===== */
+let issues = [];
+let lastLoaded = 0;
+let detailIssue = null;
+let lastClosed = null;
+let toastTimer = null;
+
+const $ = (id) => document.getElementById(id);
+const token = () => localStorage.getItem(LS.token) || '';
+
+/* ===== helpers ===== */
+function esc(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function linkify(text){
+  return text.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+}
+function timeAgo(iso){
+  const sec = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (sec < 3600)  return Math.max(1, Math.floor(sec / 60)) + '分前';
+  if (sec < 86400) return Math.floor(sec / 3600) + '時間前';
+  const d = Math.floor(sec / 86400);
+  if (d < 30)  return d + '日前';
+  if (d < 365) return Math.floor(d / 30) + 'か月前';
+  return Math.floor(d / 365) + '年前';
+}
+function showToast(msg, withUndo){
+  $('toastMsg').textContent = msg;
+  $('toastBtn').hidden = !withUndo;
+  $('toast').classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $('toast').classList.remove('show'), withUndo ? 6000 : 2600);
+}
+
+/* ===== GitHub API ===== */
+async function api(path, opts){
+  opts = opts || {};
+  const res = await fetch(API + path, {
+    method: opts.method || 'GET',
+    headers: {
+      'Authorization': 'Bearer ' + token(),
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'Content-Type': 'application/json'
+    },
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  });
+  if (res.status === 401 || res.status === 403) {
+    const e = new Error('トークンが無効か、権限が足りません'); e.auth = true; throw e;
+  }
+  if (res.status === 404) {
+    throw new Error('リポジトリにアクセスできません (404)。トークンの対象リポジトリに ' + targetName() + ' が含まれているか確認してください');
+  }
+  if (!res.ok) throw new Error('GitHub API エラー (' + res.status + ')');
+  return res.status === 204 ? null : res.json();
+}
+
+function saveCache(){
+  try {
+    localStorage.setItem(LS.issues, JSON.stringify(issues));
+    localStorage.setItem(LS.time, String(Date.now()));
+  } catch (e) { /* storage full etc. — cache is best-effort */ }
+}
+function loadCache(){
+  try {
+    const i = localStorage.getItem(LS.issues);
+    if (i) { issues = JSON.parse(i); }
+    const t = Number(localStorage.getItem(LS.time) || 0);
+    if (t && issues.length) {
+      $('staleNote').textContent = '前回表示した内容（' + timeAgo(new Date(t).toISOString()) + '）';
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function loadAll(){
+  if (!TARGET) { renderRepoSetup(); render(); return; }
+  if (!token()) { renderSetup(); render(); return; }
+  const icon = $('refreshIcon');
+  icon.classList.add('spin');
+  try {
+    const issueData = await api('/issues?state=open&per_page=100&sort=created&direction=asc');
+    issues = issueData.filter(i => !i.pull_request);
+    lastLoaded = Date.now();
+    saveCache();
+    $('staleNote').textContent = '';
+    render();
+  } catch (e) {
+    if (e.auth) { renderSetup(e.message); }
+    else if (issues.length) { showToast('通信できませんでした。前回の内容を表示しています'); }
+    else { showToast('読み込みに失敗しました: ' + e.message); }
+    render();
+  } finally {
+    icon.classList.remove('spin');
+  }
+}
+
+/* ===== actions ===== */
+async function closeIssue(issue, el){
+  if (el) el.classList.add('fading');
+  const idx = issues.indexOf(issue);
+  issues = issues.filter(i => i !== issue);
+  lastClosed = issue;
+  saveCache(); render();
+  showToast('完了にしました', true);
+  try {
+    await api('/issues/' + issue.number, { method: 'PATCH', body: { state: 'closed' } });
+  } catch (e) {
+    issues.splice(Math.min(idx, issues.length), 0, issue);
+    saveCache(); render();
+    showToast('完了にできませんでした: ' + e.message, false);
+  }
+}
+async function reopenIssue(issue){
+  try {
+    await api('/issues/' + issue.number, { method: 'PATCH', body: { state: 'open' } });
+    if (!issues.includes(issue)) { issues.push(issue); }
+    issues.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    saveCache(); render();
+    showToast('元に戻しました', false);
+  } catch (e) {
+    showToast('戻せませんでした: ' + e.message, false);
+  }
+}
+async function addIssue(title){
+  const created = await api('/issues', { method: 'POST', body: { title: title } });
+  issues.push(created);
+  saveCache(); render();
+}
+
+/* ===== rendering ===== */
+function render(){
+  /* header count */
+  $('headCount').textContent = (token() && TARGET) ? (issues.length ? issues.length + '件' : '') : '';
+
+  $('addForm').hidden = !(token() && TARGET);
+
+  /* list: one flat list, oldest first */
+  const area = $('listArea');
+  if (!token() || !TARGET) { area.innerHTML = ''; return; }
+  if (!issues.length) {
+    area.innerHTML = '<div class="empty">🎉 やることは全部終わっています<br>上の欄から追加できます</div>';
+    return;
+  }
+  let html = '<div class="card">';
+  for (const i of issues) {
+    const comments = i.comments ? '<span class="m">💬 ' + i.comments + '</span>' : '';
+    html += '<div class="item" data-num="' + i.number + '">'
+      + '<button class="check" data-close="' + i.number + '" aria-label="完了">✓</button>'
+      + '<div class="item-main" data-open="' + i.number + '">'
+      + '<div class="item-title">' + esc(i.title) + '</div>'
+      + '<div class="meta"><span class="m">#' + i.number + '</span><span class="m">' + timeAgo(i.created_at) + '</span>'
+      + comments + '</div>'
+      + '</div></div>';
+  }
+  html += '</div>';
+  area.innerHTML = html;
+
+  area.querySelectorAll('[data-close]').forEach(btn => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const num = Number(btn.dataset.close);
+      const issue = issues.find(i => i.number === num);
+      if (issue) closeIssue(issue, btn.closest('.item'));
+    });
+  });
+  area.querySelectorAll('[data-open]').forEach(el => {
+    el.addEventListener('click', () => {
+      const num = Number(el.dataset.open);
+      const issue = issues.find(i => i.number === num);
+      if (issue) openDetail(issue);
+    });
+  });
+}
+function renderRepoSetup(){
+  const area = $('setupArea');
+  area.innerHTML =
+    '<div class="setup"><h2>はじめに：対象リポジトリの設定</h2>'
+    + '<p>このアプリは、指定した GitHub リポジトリの Issues を todo リストとして表示します。まず、この端末で使うリポジトリを設定してください。</p>'
+    + '<div class="token-row"><input id="setupOwner" type="text" placeholder="owner" autocomplete="off" autocapitalize="off">'
+    + '<input id="setupRepo" type="text" placeholder="repo" autocomplete="off" autocapitalize="off"></div>'
+    + '<div class="token-row"><button class="primary-btn" id="setupTargetSave" style="flex:1">このリポジトリを使う</button></div>'
+    + '<p class="small">owner/repo の形式で1つの欄にまとめて貼り付けても構いません。設定はこの端末の中にだけ保存されます。続いて、そのリポジトリ用のアクセストークンを設定します。</p>'
+    + '</div>';
+  $('setupTargetSave').addEventListener('click', () => {
+    const parsed = parseTargetInputs($('setupOwner').value, $('setupRepo').value);
+    if (!parsed) { showToast('リポジトリ名の形式が正しくありません', false); return; }
+    setTarget(parsed.owner, parsed.repo);
+    area.innerHTML = '';
+    if (token()) { loadAll(); } else { renderSetup(); render(); }
+  });
+}
+function renderSetup(errMsg){
+  const area = $('setupArea');
+  if (token() && !errMsg) { area.innerHTML = ''; return; }
+  area.innerHTML =
+    '<div class="setup"><h2>はじめに：GitHubトークンの設定</h2>'
+    + (errMsg ? '<p style="color:var(--danger)">' + esc(errMsg) + '</p>' : '')
+    + '<p>このアプリは <b>' + esc(targetName()) + '</b> の Issues を読み書きします。そのためのトークンを、この端末にだけ保存します。対象リポジトリは設定（⚙）から変更できます。</p>'
+    + '<ol>'
+    + '<li>下のボタンから GitHub のトークン作成ページを開く</li>'
+    + '<li>Repository access で <b>対象リポジトリだけ</b> を選ぶ</li>'
+    + '<li>Permissions → Repository permissions → <b>Issues: Read and write</b> を選ぶ（Metadata は自動で付きます）</li>'
+    + '<li>発行されたトークンをコピーして、下に貼り付ける</li>'
+    + '</ol>'
+    + '<a class="primary-btn" href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">トークンを作る（GitHub）</a>'
+    + '<div class="token-row"><input id="tokenInput" type="password" placeholder="github_pat_…" autocomplete="off">'
+    + '<button class="primary-btn" id="tokenSave">保存して開始</button></div>'
+    + '<p class="small">トークンはこの端末のブラウザ内（localStorage）にのみ保存され、GitHub の API 以外へ送信されることはありません。このページ自体にデータは含まれておらず、コードは GitHub 上で公開されています。</p>'
+    + '</div>';
+  $('tokenSave').addEventListener('click', saveTokenFrom);
+  $('tokenInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveTokenFrom(); });
+}
+function saveTokenFrom(){
+  const v = $('tokenInput').value.trim();
+  if (!v) return;
+  localStorage.setItem(LS.token, v);
+  $('setupArea').innerHTML = '';
+  loadAll();
+}
+
+/* ===== detail sheet ===== */
+function openDetail(issue){
+  detailIssue = issue;
+  $('dTitle').textContent = issue.title;
+  $('dMeta').innerHTML = '<span class="m">#' + issue.number + '</span>'
+    + '<span class="m">' + new Date(issue.created_at).toLocaleDateString('ja-JP') + ' 作成</span>'
+    + (issue.comments ? '<span class="m">💬 ' + issue.comments + '</span>' : '');
+  const body = (issue.body || '').trim();
+  $('dBody').innerHTML = body ? linkify(esc(body)) : '<span style="color:var(--sub)">（本文なし）</span>';
+  $('detailOverlay').classList.add('show');
+}
+function closeDetail(){ $('detailOverlay').classList.remove('show'); detailIssue = null; }
+
+/* ===== events ===== */
+$('refreshBtn').addEventListener('click', loadAll);
+$('settingsBtn').addEventListener('click', () => {
+  $('tokenInput2').value = token();
+  $('ownerInput').value = TARGET ? TARGET.owner : '';
+  $('repoInput').value = TARGET ? TARGET.repo : '';
+  $('settingsOverlay').classList.add('show');
+});
+$('targetSave').addEventListener('click', () => {
+  const parsed = parseTargetInputs($('ownerInput').value, $('repoInput').value);
+  if (!parsed) {
+    showToast('リポジトリ名の形式が正しくありません', false); return;
+  }
+  if (TARGET && parsed.owner === TARGET.owner && parsed.repo === TARGET.repo) {
+    $('settingsOverlay').classList.remove('show'); return;
+  }
+  setTarget(parsed.owner, parsed.repo);
+  $('settingsOverlay').classList.remove('show');
+  $('setupArea').innerHTML = '';
+  showToast('対象リポジトリを ' + targetName() + ' に変更しました', false);
+  loadAll();
+});
+$('settingsClose').addEventListener('click', () => $('settingsOverlay').classList.remove('show'));
+$('settingsOverlay').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.classList.remove('show'); });
+$('tokenSave2').addEventListener('click', () => {
+  const v = $('tokenInput2').value.trim();
+  if (v) localStorage.setItem(LS.token, v);
+  $('settingsOverlay').classList.remove('show');
+  loadAll();
+});
+$('tokenClear').addEventListener('click', () => {
+  localStorage.removeItem(LS.token);
+  $('tokenInput2').value = '';
+  $('settingsOverlay').classList.remove('show');
+  issues = []; renderSetup(); render();
+});
+$('forceUpdateBtn').addEventListener('click', async () => {
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch (e) { /* fall through to reload anyway */ }
+  location.reload();
+});
+$('dClose').addEventListener('click', closeDetail);
+$('detailOverlay').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeDetail(); });
+$('dOpen').addEventListener('click', () => {
+  if (detailIssue) window.open(detailIssue.html_url, '_blank', 'noopener');
+});
+$('dDone').addEventListener('click', () => {
+  if (!detailIssue) return;
+  const i = detailIssue; closeDetail(); closeIssue(i, null);
+});
+$('toastBtn').addEventListener('click', () => {
+  $('toast').classList.remove('show');
+  if (lastClosed) reopenIssue(lastClosed);
+});
+$('addForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = $('newTitle');
+  const title = input.value.trim();
+  if (!title) return;
+  const btn = $('addBtn');
+  btn.disabled = true;
+  try {
+    await addIssue(title);
+    input.value = '';
+    showToast('追加しました', false);
+  } catch (err) {
+    showToast('追加できませんでした: ' + err.message, false);
+  } finally {
+    btn.disabled = false;
+    input.focus();
+  }
+});
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && token() && Date.now() - lastLoaded > 30000) loadAll();
+});
+
+/* ===== boot ===== */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js')
+    .then((reg) => { reg.update().catch(() => {}); })
+    .catch(() => {});
+}
+loadCache();
+if (!TARGET) { renderRepoSetup(); render(); }
+else if (token()) { render(); loadAll(); }
+else { renderSetup(); render(); }
+</script>
+</body>
+</html>
