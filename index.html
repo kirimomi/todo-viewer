@@ -48,8 +48,22 @@ header{
   backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
   border-bottom:1px solid var(--border);
 }
-.header-in{max-width:660px;margin:0 auto;padding:14px 16px 10px;display:flex;align-items:flex-end;gap:8px}
+.header-in{max-width:660px;margin:0 auto;padding:14px 16px 10px;display:flex;align-items:flex-end;gap:8px;position:relative}
 h1{font-size:26px;font-weight:800;margin:0;letter-spacing:.01em}
+.title-btn{font:inherit;display:flex;align-items:center;gap:5px;padding:0}
+.title-btn .caret{font-size:13px;color:var(--sub);font-weight:700}
+.view-menu{
+  position:absolute;top:calc(100% + 2px);left:12px;z-index:40;min-width:180px;
+  background:var(--card);border:1px solid var(--border);border-radius:14px;
+  box-shadow:0 10px 32px rgba(0,0,0,.22);padding:6px;
+}
+.view-menu button{
+  display:flex;width:100%;align-items:center;gap:8px;text-align:left;
+  padding:10px 12px;border-radius:9px;font-size:16px;font-weight:600;
+}
+.view-menu button:active{background:var(--chip-bg)}
+.view-menu .tick{width:18px;color:var(--accent);font-weight:800;visibility:hidden}
+.view-menu button.on .tick{visibility:visible}
 .count{color:var(--sub);font-size:14px;font-weight:600;padding-bottom:3px}
 .header-btns{margin-left:auto;display:flex;gap:4px;padding-bottom:2px}
 .icon-btn{
@@ -85,6 +99,8 @@ main{max-width:660px;margin:0 auto;padding:8px 16px 0}
   color:transparent;font-size:15px;font-weight:800;transition:all .15s;
 }
 .check:active{background:var(--green);border-color:var(--green);color:#fff;transform:scale(1.08)}
+.check.done{background:var(--green);border-color:var(--green);color:#fff}
+.item.done-item .item-title{color:var(--sub)}
 .item-main{flex:1;min-width:0;cursor:pointer}
 .item-title{font-size:16px;line-height:1.45;word-break:break-word}
 .item.fading{opacity:.35}
@@ -169,8 +185,12 @@ a.primary-btn{color:#fff}
 
 <header>
   <div class="header-in">
-    <h1>やること</h1>
+    <h1><button class="title-btn" id="viewTitle">やること <span class="caret">▾</span></button></h1>
     <span class="count" id="headCount"></span>
+    <div class="view-menu" id="viewMenu" hidden>
+      <button data-setview="open"><span class="tick">✓</span>やること</button>
+      <button data-setview="done"><span class="tick">✓</span>やったこと</button>
+    </div>
     <div class="header-btns">
       <button class="icon-btn" id="refreshBtn" title="再読み込み" aria-label="再読み込み"><span id="refreshIcon">↻</span></button>
       <button class="icon-btn" id="settingsBtn" title="設定" aria-label="設定">⚙</button>
@@ -298,17 +318,19 @@ function setTarget(owner, repo){
   TARGET = { owner: owner, repo: repo };
   localStorage.setItem('tv_target', JSON.stringify(TARGET));
   rebuildApi();
-  issues = []; lastLoaded = 0;
+  issues = []; doneIssues = []; lastLoaded = 0;
   localStorage.removeItem(LS.issues);
   localStorage.removeItem(LS.time);
 }
 const LS = { token:'tv_token', issues:'tv_cache_issues', time:'tv_cache_time' };
 
 /* ===== state ===== */
-let issues = [];
+let issues = [];        // open issues, oldest first
+let doneIssues = [];    // closed issues, most recently closed first
+let view = localStorage.getItem('tv_view') === 'done' ? 'done' : 'open';
 let lastLoaded = 0;
 let detailIssue = null;
-let lastClosed = null;
+let undoAction = null;  // { type: 'close' | 'reopen', issue }
 let toastTimer = null;
 
 const $ = (id) => document.getElementById(id);
@@ -386,8 +408,12 @@ async function loadAll(){
   const icon = $('refreshIcon');
   icon.classList.add('spin');
   try {
-    const issueData = await api('/issues?state=open&per_page=100&sort=created&direction=asc');
-    issues = issueData.filter(i => !i.pull_request);
+    const [openData, closedData] = await Promise.all([
+      api('/issues?state=open&per_page=100&sort=created&direction=asc'),
+      api('/issues?state=closed&per_page=100&sort=updated&direction=desc')
+    ]);
+    issues = openData.filter(i => !i.pull_request);
+    doneIssues = closedData.filter(i => !i.pull_request);
     lastLoaded = Date.now();
     saveCache();
     $('staleNote').textContent = '';
@@ -407,25 +433,42 @@ async function closeIssue(issue, el){
   if (el) el.classList.add('fading');
   const idx = issues.indexOf(issue);
   issues = issues.filter(i => i !== issue);
-  lastClosed = issue;
+  issue.closed_at = new Date().toISOString();
+  issue.state = 'closed';
+  doneIssues.unshift(issue);
+  undoAction = { type: 'close', issue: issue };
   saveCache(); render();
   showToast('完了にしました', true);
   try {
     await api('/issues/' + issue.number, { method: 'PATCH', body: { state: 'closed' } });
   } catch (e) {
+    doneIssues = doneIssues.filter(i => i !== issue);
+    issue.closed_at = null;
+    issue.state = 'open';
     issues.splice(Math.min(idx, issues.length), 0, issue);
     saveCache(); render();
     showToast('完了にできませんでした: ' + e.message, false);
   }
 }
-async function reopenIssue(issue){
+async function reopenIssue(issue, fromUndo){
+  const didx = doneIssues.indexOf(issue);
+  const prevClosed = issue.closed_at;
+  doneIssues = doneIssues.filter(i => i !== issue);
+  if (!issues.includes(issue)) { issues.push(issue); }
+  issues.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  issue.closed_at = null;
+  issue.state = 'open';
+  saveCache(); render();
+  if (fromUndo) { showToast('元に戻しました', false); }
+  else { undoAction = { type: 'reopen', issue: issue }; showToast('やることに戻しました', true); }
   try {
     await api('/issues/' + issue.number, { method: 'PATCH', body: { state: 'open' } });
-    if (!issues.includes(issue)) { issues.push(issue); }
-    issues.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-    saveCache(); render();
-    showToast('元に戻しました', false);
   } catch (e) {
+    issues = issues.filter(i => i !== issue);
+    issue.closed_at = prevClosed;
+    issue.state = 'closed';
+    doneIssues.splice(Math.min(Math.max(didx, 0), doneIssues.length), 0, issue);
+    saveCache(); render();
     showToast('戻せませんでした: ' + e.message, false);
   }
 }
@@ -437,28 +480,47 @@ async function addIssue(title){
 
 /* ===== rendering ===== */
 function render(){
-  /* header count */
-  $('headCount').textContent = (token() && TARGET) ? (issues.length ? issues.length + '件' : '') : '';
+  /* title + view menu state */
+  $('viewTitle').innerHTML = (view === 'done' ? 'やったこと' : 'やること') + ' <span class="caret">▾</span>';
+  $('viewMenu').querySelectorAll('[data-setview]').forEach(b => {
+    b.classList.toggle('on', b.dataset.setview === view);
+  });
 
-  $('addForm').hidden = !(token() && TARGET);
+  const list = (view === 'done') ? doneIssues : issues;
+  $('headCount').textContent = (token() && TARGET) ? (list.length ? list.length + '件' : '') : '';
 
-  /* list: one flat list, oldest first */
+  $('addForm').hidden = !(token() && TARGET) || view !== 'open';
+
+  /* list: one flat list */
   const area = $('listArea');
   if (!token() || !TARGET) { area.innerHTML = ''; return; }
-  if (!issues.length) {
-    area.innerHTML = '<div class="empty">🎉 やることは全部終わっています<br>上の欄から追加できます</div>';
+  if (!list.length) {
+    area.innerHTML = (view === 'done')
+      ? '<div class="empty">やったことはまだありません</div>'
+      : '<div class="empty">🎉 やることは全部終わっています<br>上の欄から追加できます</div>';
     return;
   }
   let html = '<div class="card">';
-  for (const i of issues) {
+  for (const i of list) {
     const comments = i.comments ? '<span class="m">💬 ' + i.comments + '</span>' : '';
-    html += '<div class="item" data-num="' + i.number + '">'
-      + '<button class="check" data-close="' + i.number + '" aria-label="完了">✓</button>'
-      + '<div class="item-main" data-open="' + i.number + '">'
-      + '<div class="item-title">' + esc(i.title) + '</div>'
-      + '<div class="meta"><span class="m">#' + i.number + '</span><span class="m">' + timeAgo(i.created_at) + '</span>'
-      + comments + '</div>'
-      + '</div></div>';
+    if (view === 'done') {
+      const closed = i.closed_at ? '<span class="m">完了 ' + timeAgo(i.closed_at) + '</span>' : '';
+      html += '<div class="item done-item" data-num="' + i.number + '">'
+        + '<button class="check done" data-reopen="' + i.number + '" aria-label="やることに戻す">✓</button>'
+        + '<div class="item-main" data-open="' + i.number + '">'
+        + '<div class="item-title">' + esc(i.title) + '</div>'
+        + '<div class="meta"><span class="m">#' + i.number + '</span>' + closed
+        + comments + '</div>'
+        + '</div></div>';
+    } else {
+      html += '<div class="item" data-num="' + i.number + '">'
+        + '<button class="check" data-close="' + i.number + '" aria-label="完了">✓</button>'
+        + '<div class="item-main" data-open="' + i.number + '">'
+        + '<div class="item-title">' + esc(i.title) + '</div>'
+        + '<div class="meta"><span class="m">#' + i.number + '</span><span class="m">' + timeAgo(i.created_at) + '</span>'
+        + comments + '</div>'
+        + '</div></div>';
+    }
   }
   html += '</div>';
   area.innerHTML = html;
@@ -471,13 +533,27 @@ function render(){
       if (issue) closeIssue(issue, btn.closest('.item'));
     });
   });
+  area.querySelectorAll('[data-reopen]').forEach(btn => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const num = Number(btn.dataset.reopen);
+      const issue = doneIssues.find(i => i.number === num);
+      if (issue) reopenIssue(issue, false);
+    });
+  });
   area.querySelectorAll('[data-open]').forEach(el => {
     el.addEventListener('click', () => {
       const num = Number(el.dataset.open);
-      const issue = issues.find(i => i.number === num);
+      const issue = list.find(i => i.number === num);
       if (issue) openDetail(issue);
     });
   });
+}
+function setView(v){
+  view = v;
+  localStorage.setItem('tv_view', v);
+  $('viewMenu').hidden = true;
+  render();
 }
 function renderRepoSetup(){
   const area = $('setupArea');
@@ -535,6 +611,7 @@ function openDetail(issue){
     + (issue.comments ? '<span class="m">💬 ' + issue.comments + '</span>' : '');
   const body = (issue.body || '').trim();
   $('dBody').innerHTML = body ? linkify(esc(body)) : '<span style="color:var(--sub)">（本文なし）</span>';
+  $('dDone').textContent = (issue.state === 'closed' || issue.closed_at) ? 'やることに戻す' : '完了にする';
   $('detailOverlay').classList.add('show');
 }
 function closeDetail(){ $('detailOverlay').classList.remove('show'); detailIssue = null; }
@@ -595,11 +672,28 @@ $('dOpen').addEventListener('click', () => {
 });
 $('dDone').addEventListener('click', () => {
   if (!detailIssue) return;
-  const i = detailIssue; closeDetail(); closeIssue(i, null);
+  const i = detailIssue;
+  const isDone = i.state === 'closed' || !!i.closed_at;
+  closeDetail();
+  if (isDone) reopenIssue(i, false); else closeIssue(i, null);
 });
 $('toastBtn').addEventListener('click', () => {
   $('toast').classList.remove('show');
-  if (lastClosed) reopenIssue(lastClosed);
+  if (!undoAction) return;
+  const a = undoAction; undoAction = null;
+  if (a.type === 'close') reopenIssue(a.issue, true);
+  else closeIssue(a.issue, null);
+});
+$('viewTitle').addEventListener('click', (e) => {
+  e.stopPropagation();
+  $('viewMenu').hidden = !$('viewMenu').hidden;
+});
+$('viewMenu').querySelectorAll('[data-setview]').forEach(b => {
+  b.addEventListener('click', () => setView(b.dataset.setview));
+});
+document.addEventListener('click', (e) => {
+  const menu = $('viewMenu');
+  if (!menu.hidden && !menu.contains(e.target)) menu.hidden = true;
 });
 $('addForm').addEventListener('submit', async (e) => {
   e.preventDefault();

@@ -1,7 +1,7 @@
 'use strict';
 /* App shell cache only. GitHub API responses are never cached here
    (the page keeps its own last-view snapshot in localStorage). */
-const CACHE = 'todo-viewer-v8';
+const CACHE = 'todo-viewer-v9';
 const SHELL = [
   './',
   './index.html',
